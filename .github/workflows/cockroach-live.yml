@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
-      PGSSLROOTCERT: system
+      PGSSLROOTCERT: /etc/ssl/certs/ca-certificates.crt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
