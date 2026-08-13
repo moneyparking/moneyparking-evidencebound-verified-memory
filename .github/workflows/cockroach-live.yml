@@ -173,7 +173,6 @@ jobs:
             --stack-name "$STACK_NAME" \
             --template-file /tmp/evidencebound-template.yaml \
             --capabilities CAPABILITY_IAM \
-            --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               CodeBucket="$DEPLOY_BUCKET" \
