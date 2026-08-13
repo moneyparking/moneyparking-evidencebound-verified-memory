@@ -16,7 +16,10 @@ def main():
     migration = migrate(url)
     repo = CockroachRepository(url)
     with psycopg.connect(url, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("SHOW TABLES")
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"
+        )
         tables = {row[0] for row in cur.fetchall()}
         assert {"verified_memories", "verification_incidents"}.issubset(tables)
         cur.execute("SHOW CREATE TABLE verification_incidents")
