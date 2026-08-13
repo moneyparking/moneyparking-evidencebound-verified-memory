@@ -17,7 +17,7 @@ class BedrockClient:
         self.runtime = runtime
         self.explanation_model_id = os.getenv(
             "BEDROCK_EXPLANATION_MODEL_ID",
-            "amazon.titan-text-premier-v1:0",
+            "amazon.titan-text-express-v1",
         )
 
     def explain(self, trusted_result: dict[str, Any]) -> str:

@@ -35,7 +35,7 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_REGION: us-east-1
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
-      BEDROCK_EXPLANATION_MODEL_ID: amazon.titan-text-premier-v1:0
+      BEDROCK_EXPLANATION_MODEL_ID: amazon.titan-text-express-v1
       STACK_NAME: evidencebound-verified-memory
     steps:
       - uses: actions/checkout@v4
@@ -245,7 +245,7 @@ jobs:
               f"integrity={reopened['historical_integrity']} "
               f"applicability={reopened['current_applicability']} "
               f"changes={','.join(sorted(changes))} "
-              'vector_signature=deterministic bedrock_model=titan-text-premier explanation=present fresh_session=true'
+              'vector_signature=deterministic bedrock_model=titan-text-express explanation=present fresh_session=true'
           )
           PY
           echo "AWS_DEPLOYMENT_IDENTITY=PASS function_arn=$FUNCTION_ARN"
