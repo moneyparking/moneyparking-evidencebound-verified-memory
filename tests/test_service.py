@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from evidencebound.core import FAIL_CLOSED, REVIEW_REQUIRED
+from evidencebound.repository import VECTOR_INDEX
 from evidencebound.service import EvidenceBoundService
 
 
@@ -18,7 +19,7 @@ class Repo:
         return [{"text": "stored"}]
 
     def tooling_evidence(self):
-        return {"vector_index": "verification_incidents_embedding_idx", "verified_memory_rows": 1}
+        return {"vector_index": VECTOR_INDEX, "verified_memory_rows": 1}
 
 
 class Model:
