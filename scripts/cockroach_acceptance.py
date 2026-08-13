@@ -6,7 +6,13 @@ from evidencebound.repository import CockroachRepository
 
 def main():
     import psycopg
-    url = os.environ["COCKROACH_DATABASE_URL"]
+    from psycopg.conninfo import make_conninfo
+
+    url = make_conninfo(
+        os.environ["COCKROACH_DATABASE_URL"],
+        sslmode="verify-full",
+        sslrootcert=os.environ["PGSSLROOTCERT"],
+    )
     migration = migrate(url)
     repo = CockroachRepository(url)
     with psycopg.connect(url, autocommit=True) as conn, conn.cursor() as cur:
