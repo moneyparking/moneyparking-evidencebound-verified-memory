@@ -14,11 +14,14 @@ class CockroachRepository:
         self.database_url = database_url or os.environ["COCKROACH_DATABASE_URL"]
 
     def _connect(self):
-        import certifi
         import psycopg
         from psycopg.conninfo import make_conninfo
 
-        root_cert = os.getenv("PGSSLROOTCERT") or certifi.where()
+        root_cert = os.getenv("PGSSLROOTCERT")
+        if not root_cert:
+            import certifi
+
+            root_cert = certifi.where()
         connection_url = make_conninfo(
             self.database_url,
             sslmode="verify-full",
