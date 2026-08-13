@@ -23,4 +23,5 @@ CREATE TABLE verification_incidents (
     INDEX verification_incidents_memory_idx (memory_id)
 );
 -- statement-break
-CREATE VECTOR INDEX verification_incidents_embedding_idx ON verification_incidents (embedding);
+ALTER TABLE verification_incidents ADD COLUMN IF NOT EXISTS embedding VECTOR(1024) NULL;
+-- statement-breakCREATE VECTOR INDEX verification_incidents_embedding_idx ON verification_incidents (embedding);
