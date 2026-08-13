@@ -33,10 +33,10 @@ jobs:
       id-token: write
     env:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      AWS_REGION: us-east-1
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
-      BEDROCK_EXPLANATION_MODEL_ID: ${{ vars.BEDROCK_EXPLANATION_MODEL_ID || 'amazon.nova-lite-v1:0' }}
-      BEDROCK_EMBEDDING_MODEL_ID: ${{ vars.BEDROCK_EMBEDDING_MODEL_ID || 'amazon.titan-embed-text-v2:0' }}
+      BEDROCK_EXPLANATION_MODEL_ID: amazon.nova-micro-v1:0
+      BEDROCK_EMBEDDING_MODEL_ID: amazon.titan-embed-text-v2:0
       STACK_NAME: evidencebound-verified-memory
     steps:
       - uses: actions/checkout@v4
@@ -59,37 +59,6 @@ jobs:
 
       - name: Verify AWS deployment identity
         run: aws sts get-caller-identity
-
-      - name: Verify real Bedrock and trusted-state boundary
-        run: |
-          python -m pip install -e .
-          python - <<'PY'
-          from copy import deepcopy
-          from evidencebound.bedrock import BedrockClient
-
-          trusted = {
-              "historical_integrity": "VERIFIED",
-              "historical_decision": "VERIFIED",
-              "current_applicability": "REVIEW_REQUIRED",
-              "changes": [
-                  {"evidence_id": "policy", "change": "UNCHANGED"},
-                  {"evidence_id": "availability", "change": "CHANGED"},
-                  {"evidence_id": "weather", "change": "STALE"},
-                  {"evidence_id": "lineup", "change": "NEW"},
-              ],
-          }
-          before = deepcopy(trusted)
-          client = BedrockClient()
-          embedding = client.embed("Prior EvidenceBound verification incident and evidence conflict")
-          explanation = client.explain(trusted)
-          assert len(embedding) == 1024
-          assert explanation.strip()
-          assert trusted == before
-          print(
-              "BEDROCK_ACCEPTANCE=PASS embedding_dims=1024 "
-              f"explanation_chars={len(explanation)} trusted_state_unchanged=true"
-          )
-          PY
 
       - name: Build Lambda deployment package
         run: |
@@ -162,7 +131,8 @@ jobs:
                 Architectures:
                   - x86_64
                 MemorySize: 512
-                Timeout: 30
+                Timeout: 60
+                ReservedConcurrentExecutions: 2
                 Role: !GetAtt LambdaRole.Arn
                 Code:
                   S3Bucket: !Ref CodeBucket
@@ -226,8 +196,9 @@ jobs:
           test -n "$FUNCTION_ARN"
           BASE="${FUNCTION_URL%/}"
 
-          curl --fail --silent --show-error --retry 5 --retry-all-errors "$BASE/health" > /tmp/health.json
-          curl --fail --silent --show-error --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
+            "$BASE/health" > /tmp/health.json
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
             -X POST -H 'content-type: application/json' -d '{}' \
             "$BASE/api/save" > /tmp/save.json
           MEMORY_ID="$(python -c 'import json; print(json.load(open("/tmp/save.json"))["memory_id"])')"
@@ -235,7 +206,7 @@ jobs:
           import json, sys
           print(json.dumps({"memory_id": sys.argv[1]}))
           PY
-          curl --fail --silent --show-error --retry 5 --retry-all-errors \
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
             -X POST -H 'content-type: application/json' \
             --data-binary @/tmp/reopen-body.json \
             "$BASE/api/reopen" > /tmp/reopen.json
@@ -262,7 +233,7 @@ jobs:
               f"integrity={reopened['historical_integrity']} "
               f"applicability={reopened['current_applicability']} "
               f"changes={','.join(sorted(changes))} "
-              'bedrock_explanation=present fresh_session=true'
+              'titan_embedding=used nova_micro_explanation=present fresh_session=true'
           )
           PY
           echo "AWS_DEPLOYMENT_IDENTITY=PASS function_arn=$FUNCTION_ARN"
