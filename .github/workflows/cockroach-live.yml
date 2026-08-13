@@ -1,16 +1,20 @@
 name: Cockroach Live Acceptance
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   live:
     runs-on: ubuntu-latest
     env:
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
+      PGSSLROOTCERT: system
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
