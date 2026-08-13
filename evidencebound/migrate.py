@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-MIGRATION_VERSION = "001_verified_memory_vector"
+MIGRATION_VERSION = "002_evidencebound_namespaced_tables"
 
 
 def migrate(database_url: str | None = None) -> str:
