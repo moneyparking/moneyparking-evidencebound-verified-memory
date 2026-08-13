@@ -79,6 +79,13 @@ jobs:
           fi
           aws s3 cp .build/lambda.zip "s3://${DEPLOY_BUCKET}/${S3_KEY}" --only-show-errors
 
+          EXISTING_STATUS="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)"
+          if [ "$EXISTING_STATUS" = "ROLLBACK_COMPLETE" ]; then
+            echo "Removing previous failed stack before retry"
+            aws cloudformation delete-stack --stack-name "$STACK_NAME"
+            aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
+          fi
+
           cat > /tmp/evidencebound-template.yaml <<'YAML'
           AWSTemplateFormatVersion: '2010-09-09'
           Description: EvidenceBound Verified Memory judge service
@@ -98,6 +105,7 @@ jobs:
             LambdaRole:
               Type: AWS::IAM::Role
               Properties:
+                RoleName: evidencebound-verified-memory-runtime
                 AssumeRolePolicyDocument:
                   Version: '2012-10-17'
                   Statement:
@@ -132,7 +140,6 @@ jobs:
                   - x86_64
                 MemorySize: 512
                 Timeout: 60
-                ReservedConcurrentExecutions: 2
                 Role: !GetAtt LambdaRole.Arn
                 Code:
                   S3Bucket: !Ref CodeBucket
@@ -169,17 +176,25 @@ jobs:
               Value: !GetAtt Function.Arn
           YAML
 
-          aws cloudformation deploy \
+          if ! aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
             --template-file /tmp/evidencebound-template.yaml \
-            --capabilities CAPABILITY_IAM \
+            --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               CodeBucket="$DEPLOY_BUCKET" \
               CodeKey="$S3_KEY" \
               CockroachDatabaseUrl="$COCKROACH_DATABASE_URL" \
               ExplanationModelId="$BEDROCK_EXPLANATION_MODEL_ID" \
-              EmbeddingModelId="$BEDROCK_EMBEDDING_MODEL_ID"
+              EmbeddingModelId="$BEDROCK_EMBEDDING_MODEL_ID"; then
+            echo "CLOUDFORMATION_DEPLOY=FAIL"
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+              --output table || true
+            exit 1
+          fi
+          echo "CLOUDFORMATION_DEPLOY=PASS"
 
       - name: Public independent-session acceptance
         run: |
