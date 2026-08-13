@@ -209,21 +209,27 @@ jobs:
           test -n "$FUNCTION_URL"
           test -n "$FUNCTION_ARN"
           BASE="${FUNCTION_URL%/}"
+          echo "AWS_PUBLIC_URL=$FUNCTION_URL"
 
-          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
-            "$BASE/health" > /tmp/health.json
-          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
-            -X POST -H 'content-type: application/json' -d '{}' \
-            "$BASE/api/save" > /tmp/save.json
+          echo "PUBLIC_STAGE=health"
+          HEALTH_HTTP="$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$BASE/health")"
+          echo "PUBLIC_HEALTH_HTTP=$HEALTH_HTTP"
+          if [ "$HEALTH_HTTP" != "200" ]; then cat /tmp/health.json; exit 1; fi
+
+          echo "PUBLIC_STAGE=save"
+          SAVE_HTTP="$(curl --silent --show-error -o /tmp/save.json -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "$BASE/api/save")"
+          echo "PUBLIC_SAVE_HTTP=$SAVE_HTTP"
+          if [ "$SAVE_HTTP" != "200" ]; then cat /tmp/save.json; exit 1; fi
+
           MEMORY_ID="$(python -c 'import json; print(json.load(open("/tmp/save.json"))["memory_id"])')"
           python - "$MEMORY_ID" > /tmp/reopen-body.json <<'PY'
           import json, sys
           print(json.dumps({"memory_id": sys.argv[1]}))
           PY
-          curl --fail --silent --show-error --retry 8 --retry-delay 5 --retry-max-time 120 --retry-all-errors \
-            -X POST -H 'content-type: application/json' \
-            --data-binary @/tmp/reopen-body.json \
-            "$BASE/api/reopen" > /tmp/reopen.json
+          echo "PUBLIC_STAGE=reopen"
+          REOPEN_HTTP="$(curl --silent --show-error -o /tmp/reopen.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary @/tmp/reopen-body.json "$BASE/api/reopen")"
+          echo "PUBLIC_REOPEN_HTTP=$REOPEN_HTTP"
+          if [ "$REOPEN_HTTP" != "200" ]; then cat /tmp/reopen.json; exit 1; fi
 
           python - <<'PY'
           import json
