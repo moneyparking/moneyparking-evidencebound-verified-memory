@@ -22,6 +22,14 @@ def _connection_string() -> str:
 
 
 def connect() -> psycopg.Connection[Any]:
+    root_cert = os.environ.get("COCKROACH_SSL_ROOT_CERT")
+    if root_cert:
+        return psycopg.connect(
+            _connection_string(),
+            application_name="evidencebound-verified-memory",
+            sslmode="verify-full",
+            sslrootcert=root_cert,
+        )
     return psycopg.connect(_connection_string(), application_name="evidencebound-verified-memory")
 
 
