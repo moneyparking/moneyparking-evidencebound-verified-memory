@@ -74,6 +74,7 @@ jobs:
           ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           DEPLOY_BUCKET="evidencebound-deploy-${ACCOUNT_ID}-${AWS_REGION}"
           S3_KEY="lambda/${GITHUB_SHA}.zip"
+          export DEPLOY_BUCKET S3_KEY
           if ! aws s3api head-bucket --bucket "$DEPLOY_BUCKET" 2>/dev/null; then
             aws s3api create-bucket --bucket "$DEPLOY_BUCKET" --region "$AWS_REGION"
           fi
@@ -190,7 +191,6 @@ jobs:
               json.dump([{"ParameterKey": key, "ParameterValue": value} for key, value in parameters.items()], handle)
           PY
 
-          export DEPLOY_BUCKET S3_KEY
           if [ -z "$EXISTING_STATUS" ]; then
             aws cloudformation create-stack \
               --stack-name "$STACK_NAME" \
