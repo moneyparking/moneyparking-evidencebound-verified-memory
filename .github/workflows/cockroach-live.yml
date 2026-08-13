@@ -35,8 +35,7 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_REGION: us-east-1
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
-      BEDROCK_EXPLANATION_MODEL_ID: amazon.nova-micro-v1:0
-      BEDROCK_EMBEDDING_MODEL_ID: amazon.titan-embed-text-v2:0
+      BEDROCK_EXPLANATION_MODEL_ID: us.amazon.nova-micro-v1:0
       STACK_NAME: evidencebound-verified-memory
     steps:
       - uses: actions/checkout@v4
@@ -99,9 +98,7 @@ jobs:
             CockroachDatabaseUrl:
               Type: String
               NoEcho: true
-            ExplanationModelId:
-              Type: String
-            EmbeddingModelId:
+            ExplanationProfileId:
               Type: String
           Resources:
             LambdaRole:
@@ -130,8 +127,10 @@ jobs:
                           Action:
                             - bedrock:InvokeModel
                           Resource:
-                            - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ExplanationModelId}
-                            - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+                            - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ExplanationProfileId}
+                            - !Sub arn:${AWS::Partition}:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0
+                            - !Sub arn:${AWS::Partition}:bedrock:us-east-2::foundation-model/amazon.nova-micro-v1:0
+                            - !Sub arn:${AWS::Partition}:bedrock:us-west-2::foundation-model/amazon.nova-micro-v1:0
             Function:
               Type: AWS::Lambda::Function
               Properties:
@@ -149,8 +148,7 @@ jobs:
                 Environment:
                   Variables:
                     COCKROACH_DATABASE_URL: !Ref CockroachDatabaseUrl
-                    BEDROCK_EXPLANATION_MODEL_ID: !Ref ExplanationModelId
-                    BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+                    BEDROCK_EXPLANATION_MODEL_ID: !Ref ExplanationProfileId
             FunctionUrl:
               Type: AWS::Lambda::Url
               Properties:
@@ -184,8 +182,7 @@ jobs:
               "CodeBucket": os.environ["DEPLOY_BUCKET"],
               "CodeKey": os.environ["S3_KEY"],
               "CockroachDatabaseUrl": os.environ["COCKROACH_DATABASE_URL"],
-              "ExplanationModelId": os.environ["BEDROCK_EXPLANATION_MODEL_ID"],
-              "EmbeddingModelId": os.environ["BEDROCK_EMBEDDING_MODEL_ID"],
+              "ExplanationProfileId": os.environ["BEDROCK_EXPLANATION_MODEL_ID"],
           }
           with open('/tmp/evidencebound-parameters.json', 'w', encoding='utf-8') as handle:
               json.dump([{"ParameterKey": key, "ParameterValue": value} for key, value in parameters.items()], handle)
@@ -294,7 +291,7 @@ jobs:
               f"integrity={reopened['historical_integrity']} "
               f"applicability={reopened['current_applicability']} "
               f"changes={','.join(sorted(changes))} "
-              'titan_embedding=used nova_micro_explanation=present fresh_session=true'
+              'vector_signature=deterministic bedrock_profile=us-nova-micro explanation=present fresh_session=true'
           )
           PY
           echo "AWS_DEPLOYMENT_IDENTITY=PASS function_arn=$FUNCTION_ARN"
