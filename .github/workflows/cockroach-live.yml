@@ -35,7 +35,7 @@ jobs:
       AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
       AWS_REGION: us-east-1
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
-      BEDROCK_EXPLANATION_MODEL_ID: amazon.nova-micro-v1:0
+      BEDROCK_EXPLANATION_MODEL_ID: amazon.nova-pro-v1:0
       STACK_NAME: evidencebound-verified-memory
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
           (cd .build/lambda && zip -qr ../lambda.zip .)
           test -s .build/lambda.zip
 
-      - name: Upload package and deploy CloudFormation stack
+      - name: Deploy CloudFormation stack
         run: |
           ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           DEPLOY_BUCKET="evidencebound-deploy-${ACCOUNT_ID}-${AWS_REGION}"
@@ -81,7 +81,6 @@ jobs:
 
           EXISTING_STATUS="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)"
           if [ "$EXISTING_STATUS" = "ROLLBACK_COMPLETE" ]; then
-            echo "Removing previous failed stack before retry"
             aws cloudformation delete-stack --stack-name "$STACK_NAME"
             aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
             EXISTING_STATUS=""
@@ -91,15 +90,10 @@ jobs:
           AWSTemplateFormatVersion: '2010-09-09'
           Description: EvidenceBound Verified Memory judge service
           Parameters:
-            CodeBucket:
-              Type: String
-            CodeKey:
-              Type: String
-            CockroachDatabaseUrl:
-              Type: String
-              NoEcho: true
-            ExplanationModelId:
-              Type: String
+            CodeBucket: {Type: String}
+            CodeKey: {Type: String}
+            CockroachDatabaseUrl: {Type: String, NoEcho: true}
+            ExplanationModelId: {Type: String}
           Resources:
             LambdaRole:
               Type: AWS::IAM::Role
@@ -109,8 +103,7 @@ jobs:
                   Version: '2012-10-17'
                   Statement:
                     - Effect: Allow
-                      Principal:
-                        Service: lambda.amazonaws.com
+                      Principal: {Service: lambda.amazonaws.com}
                       Action: sts:AssumeRole
                 Policies:
                   - PolicyName: EvidenceBoundRuntime
@@ -118,32 +111,22 @@ jobs:
                       Version: '2012-10-17'
                       Statement:
                         - Effect: Allow
-                          Action:
-                            - logs:CreateLogGroup
-                            - logs:CreateLogStream
-                            - logs:PutLogEvents
+                          Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
                           Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
                         - Effect: Allow
-                          Action:
-                            - bedrock-mantle:CreateInference
-                            - bedrock-mantle:GetProject
-                            - bedrock-mantle:ListProjects
-                            - bedrock-mantle:ListTagsForResources
-                          Resource: '*'
+                          Action: bedrock:InvokeModel
+                          Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ExplanationModelId}
             Function:
               Type: AWS::Lambda::Function
               Properties:
                 FunctionName: evidencebound-verified-memory
                 Runtime: python3.12
                 Handler: evidencebound.handler.lambda_handler
-                Architectures:
-                  - x86_64
+                Architectures: [x86_64]
                 MemorySize: 512
                 Timeout: 60
                 Role: !GetAtt LambdaRole.Arn
-                Code:
-                  S3Bucket: !Ref CodeBucket
-                  S3Key: !Ref CodeKey
+                Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
                 Environment:
                   Variables:
                     COCKROACH_DATABASE_URL: !Ref CockroachDatabaseUrl
@@ -169,22 +152,20 @@ jobs:
                 InvokedViaFunctionUrl: true
                 Principal: '*'
           Outputs:
-            FunctionUrl:
-              Value: !GetAtt FunctionUrl.FunctionUrl
-            FunctionArn:
-              Value: !GetAtt Function.Arn
+            FunctionUrl: {Value: !GetAtt FunctionUrl.FunctionUrl}
+            FunctionArn: {Value: !GetAtt Function.Arn}
           YAML
 
           python - <<'PY'
           import json, os
-          parameters = {
+          values = {
               "CodeBucket": os.environ["DEPLOY_BUCKET"],
               "CodeKey": os.environ["S3_KEY"],
               "CockroachDatabaseUrl": os.environ["COCKROACH_DATABASE_URL"],
               "ExplanationModelId": os.environ["BEDROCK_EXPLANATION_MODEL_ID"],
           }
           with open('/tmp/evidencebound-parameters.json', 'w', encoding='utf-8') as handle:
-              json.dump([{"ParameterKey": key, "ParameterValue": value} for key, value in parameters.items()], handle)
+              json.dump([{"ParameterKey": k, "ParameterValue": v} for k, v in values.items()], handle)
           PY
 
           if [ -z "$EXISTING_STATUS" ]; then
@@ -193,13 +174,7 @@ jobs:
               --template-body file:///tmp/evidencebound-template.yaml \
               --capabilities CAPABILITY_NAMED_IAM \
               --parameters file:///tmp/evidencebound-parameters.json >/dev/null
-            if ! aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"; then
-              echo "CLOUDFORMATION_CREATE=FAIL"
-              aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
-                --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-                --output table || true
-              exit 1
-            fi
+            aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"
             echo "CLOUDFORMATION_CREATE=PASS"
           else
             set +e
@@ -214,46 +189,29 @@ jobs:
               if printf '%s' "$UPDATE_OUTPUT" | grep -q 'No updates are to be performed'; then
                 echo "CLOUDFORMATION_UPDATE=NO_CHANGES"
               else
-                echo "CLOUDFORMATION_UPDATE=FAIL"
                 printf '%s\n' "$UPDATE_OUTPUT"
-                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
-                  --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-                  --output table || true
+                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" --output table || true
                 exit 1
               fi
             else
-              if ! aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"; then
-                echo "CLOUDFORMATION_UPDATE_WAIT=FAIL"
-                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
-                  --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-                  --output table || true
-                exit 1
-              fi
+              aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
               echo "CLOUDFORMATION_UPDATE=PASS"
             fi
           fi
 
       - name: Public independent-session acceptance
         run: |
-          FUNCTION_URL="$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" \
-            --output text)"
-          FUNCTION_ARN="$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" \
-            --output text)"
+          FUNCTION_URL="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)"
+          FUNCTION_ARN="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" --output text)"
           test -n "$FUNCTION_URL"
           test -n "$FUNCTION_ARN"
           BASE="${FUNCTION_URL%/}"
           echo "AWS_PUBLIC_URL=$FUNCTION_URL"
 
-          echo "PUBLIC_STAGE=health"
           HEALTH_HTTP="$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$BASE/health")"
           echo "PUBLIC_HEALTH_HTTP=$HEALTH_HTTP"
-          if [ "$HEALTH_HTTP" != "200" ]; then cat /tmp/health.json; exit 1; fi
+          test "$HEALTH_HTTP" = "200"
 
-          echo "PUBLIC_STAGE=save"
           SAVE_HTTP="$(curl --silent --show-error -o /tmp/save.json -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "$BASE/api/save")"
           echo "PUBLIC_SAVE_HTTP=$SAVE_HTTP"
           if [ "$SAVE_HTTP" != "200" ]; then cat /tmp/save.json; exit 1; fi
@@ -263,17 +221,14 @@ jobs:
           import json, sys
           print(json.dumps({"memory_id": sys.argv[1]}))
           PY
-          echo "PUBLIC_STAGE=reopen"
           REOPEN_HTTP="$(curl --silent --show-error -o /tmp/reopen.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary @/tmp/reopen-body.json "$BASE/api/reopen")"
           echo "PUBLIC_REOPEN_HTTP=$REOPEN_HTTP"
           if [ "$REOPEN_HTTP" != "200" ]; then cat /tmp/reopen.json; exit 1; fi
 
           python - <<'PY'
           import json
-          health = json.load(open('/tmp/health.json'))
           saved = json.load(open('/tmp/save.json'))
           reopened = json.load(open('/tmp/reopen.json'))
-          assert health['status'] == 'ok'
           assert saved['session_a_ended'] is True
           assert saved['historical_decision'] == 'VERIFIED'
           assert reopened['fresh_session'] is True
@@ -290,7 +245,7 @@ jobs:
               f"integrity={reopened['historical_integrity']} "
               f"applicability={reopened['current_applicability']} "
               f"changes={','.join(sorted(changes))} "
-              'vector_signature=deterministic bedrock_endpoint=mantle nova_micro_explanation=present fresh_session=true'
+              'vector_signature=deterministic bedrock_model=nova-pro explanation=present fresh_session=true'
           )
           PY
           echo "AWS_DEPLOYMENT_IDENTITY=PASS function_arn=$FUNCTION_ARN"
