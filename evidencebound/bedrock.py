@@ -17,7 +17,7 @@ class BedrockClient:
         self.runtime = runtime
         self.explanation_model_id = os.getenv(
             "BEDROCK_EXPLANATION_MODEL_ID",
-            "amazon.nova-pro-v1:0",
+            "amazon.titan-text-premier-v1:0",
         )
 
     def explain(self, trusted_result: dict[str, Any]) -> str:
@@ -37,15 +37,26 @@ class BedrockClient:
             "Historical integrity and current applicability are separate.\n"
             + json.dumps(locked, sort_keys=True, separators=(",", ":"))
         )
-        response = self.runtime.converse(
+        response = self.runtime.invoke_model(
             modelId=self.explanation_model_id,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 48, "temperature": 0.0},
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps(
+                {
+                    "inputText": prompt,
+                    "textGenerationConfig": {
+                        "maxTokenCount": 48,
+                        "temperature": 0.0,
+                    },
+                },
+                separators=(",", ":"),
+            ),
         )
-        blocks = response.get("output", {}).get("message", {}).get("content", [])
-        text = "".join(
-            block.get("text", "") for block in blocks if isinstance(block, dict)
-        ).strip()
-        if not text:
-            raise RuntimeError("Bedrock explanation was empty")
-        return text
+        payload = json.loads(response["body"].read())
+        results = payload.get("results")
+        if not isinstance(results, list) or not results:
+            raise RuntimeError("Bedrock Titan Text response had no results")
+        text = results[0].get("outputText") if isinstance(results[0], dict) else None
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Bedrock Titan Text explanation was empty")
+        return text.strip()
