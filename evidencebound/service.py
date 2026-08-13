@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import math
 from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
@@ -16,6 +18,7 @@ from .demo import demo_evidence
 
 POLICY_VERSION = "evidencebound-policy-1"
 PROOF_VERSION = "evidencebound-proof-1"
+VECTOR_DIMENSIONS = 1024
 
 
 class Repository(Protocol):
@@ -34,8 +37,23 @@ class Repository(Protocol):
 
 
 class Explainer(Protocol):
-    def embed(self, text: str) -> list[float]: ...
     def explain(self, trusted_result: dict[str, Any]) -> str: ...
+
+
+def incident_vector(text: str) -> list[float]:
+    """Build a deterministic 1024-d verification-incident signature."""
+    vector = [0.0] * VECTOR_DIMENSIONS
+    tokens = text.casefold().split()
+    if not tokens:
+        return vector
+    for token in tokens:
+        digest = hashlib.sha256(token.encode("utf-8")).digest()
+        slot = int.from_bytes(digest[:2], "big") % VECTOR_DIMENSIONS
+        vector[slot] += 1.0 if digest[2] & 1 else -1.0
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0.0:
+        return vector
+    return [value / norm for value in vector]
 
 
 class EvidenceBoundService:
@@ -59,15 +77,12 @@ class EvidenceBoundService:
             f"T0 decision VERIFIED under {POLICY_VERSION}; "
             f"evidence hash {snapshot['evidence_hash']}."
         )
-        # Resolve the embedding before persistence. A transient Bedrock failure therefore
-        # cannot leave a historical snapshot that appears saved but lacks its recall incident.
-        incident_embedding = self.bedrock.embed(incident_text)
         self.repository.save_snapshot(snapshot)
         self.repository.save_incident(
             memory_id=memory_id,
             incident_type="verified_decision",
             text=incident_text,
-            embedding=incident_embedding,
+            embedding=incident_vector(incident_text),
         )
         return {
             "memory_id": memory_id,
@@ -117,8 +132,6 @@ class EvidenceBoundService:
             "historical_decision": snapshot["decision_state"],
             "current_applicability": current_applicability(integrity["state"], changes),
             "changes": changes,
-            # Reuse the persisted incident embedding as the CockroachDB query vector.
-            # This preserves vector-index recall without a second Bedrock embedding call.
             "recalled_incidents": self.repository.recall_incidents(memory_id=memory_id, limit=3),
             "record_hash": snapshot["record_hash"],
             "evidence_hash": snapshot["evidence_hash"],
