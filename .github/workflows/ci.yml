@@ -39,6 +39,15 @@ jobs:
             exit 1
           fi
           echo "COCKROACH_DATABASE_URL_PRESENT=true"
+      - name: Install CockroachDB Cloud CA
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.postgresql"
+          curl --fail --silent --show-error --location \
+            --output "$HOME/.postgresql/root.crt" \
+            'https://cockroachlabs.cloud/clusters/517d4638-238e-4df0-9346-4522d1ddfe3e/cert'
+          chmod 0600 "$HOME/.postgresql/root.crt"
+          echo "COCKROACH_SSL_ROOT_CERT=$HOME/.postgresql/root.crt" >> "$GITHUB_ENV"
       - run: python -m pip install -e .
       - name: Real CockroachDB independent-session acceptance
         run: python scripts/live_acceptance.py
