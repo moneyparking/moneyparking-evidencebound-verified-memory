@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .integrity import evidence_hash
 from .models import DiffEntry, EvidenceItem
 
 
 def _parse_time(value: str) -> datetime:
-    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(value)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def compare_evidence(
@@ -17,7 +17,7 @@ def compare_evidence(
     *,
     now: datetime | None = None,
 ) -> tuple[DiffEntry, ...]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     previous = {item.evidence_key: item for item in historical}
     latest = {item.evidence_key: item for item in current}
     result: list[DiffEntry] = []

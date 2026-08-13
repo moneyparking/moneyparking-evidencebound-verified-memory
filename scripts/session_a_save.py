@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+
 from demo_data import t0_snapshot
+
 from evidencebound.repository import apply_migrations, connect, save_snapshot
 
 if __name__ == "__main__":

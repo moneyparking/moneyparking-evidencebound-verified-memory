@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from evidencebound.diff import compare_evidence
 from evidencebound.integrity import compute_snapshot_hash, evidence_hash, verify_snapshot
 from evidencebound.models import EvidenceItem, Snapshot
@@ -46,7 +47,7 @@ def test_policy_version_drift_requires_review() -> None:
 
 
 def test_canonical_diff_states() -> None:
-    now = datetime(2026, 8, 13, 13, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 13, 13, tzinfo=UTC)
     old = (item("same", 1), item("changed", 1), item("stale", 1, valid_until="2026-08-13T10:00:00Z"))
     new = (item("same", 1), item("changed", 2), item("stale", 1, valid_until="2026-08-13T10:00:00Z"), item("new", 4))
     assert {x.state for x in compare_evidence(old, new, now=now)} == {"UNCHANGED", "CHANGED", "STALE", "NEW"}
