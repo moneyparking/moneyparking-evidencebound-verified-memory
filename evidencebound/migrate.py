@@ -8,6 +8,7 @@ MIGRATION_VERSION = "001_verified_memory_vector"
 
 def migrate(database_url: str | None = None) -> str:
     import psycopg
+
     url = database_url or os.environ["COCKROACH_DATABASE_URL"]
     root = Path(__file__).resolve().parents[1]
     statements = (root / "migrations" / "001_init.sql").read_text(encoding="utf-8").split("-- statement-break")
@@ -17,9 +18,13 @@ def migrate(database_url: str | None = None) -> str:
         if cur.fetchone():
             return "already_applied"
         for statement in statements:
-            if statement.strip():
+            if not statement.strip():
+                continue
+            try:
                 cur.execute(statement.strip())
-        cur.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (MIGRATION_VERSION,))
+            except (psycopg.errors.DuplicateTable, psycopg.errors.DuplicateObject):
+                continue
+        cur.execute("INSERT INTO schema_migrations (version) VALUES (%s) ON CONFLICT (version) DO NOTHING", (MIGRATION_VERSION,))
     return "applied"
 
 
