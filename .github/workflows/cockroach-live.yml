@@ -84,6 +84,7 @@ jobs:
             echo "Removing previous failed stack before retry"
             aws cloudformation delete-stack --stack-name "$STACK_NAME"
             aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
+            EXISTING_STATUS=""
           fi
 
           cat > /tmp/evidencebound-template.yaml <<'YAML'
@@ -176,25 +177,65 @@ jobs:
               Value: !GetAtt Function.Arn
           YAML
 
-          if ! aws cloudformation deploy \
-            --stack-name "$STACK_NAME" \
-            --template-file /tmp/evidencebound-template.yaml \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              CodeBucket="$DEPLOY_BUCKET" \
-              CodeKey="$S3_KEY" \
-              CockroachDatabaseUrl="$COCKROACH_DATABASE_URL" \
-              ExplanationModelId="$BEDROCK_EXPLANATION_MODEL_ID" \
-              EmbeddingModelId="$BEDROCK_EMBEDDING_MODEL_ID"; then
-            echo "CLOUDFORMATION_DEPLOY=FAIL"
-            aws cloudformation describe-stack-events \
+          python - <<'PY'
+          import json, os
+          parameters = {
+              "CodeBucket": os.environ["DEPLOY_BUCKET"],
+              "CodeKey": os.environ["S3_KEY"],
+              "CockroachDatabaseUrl": os.environ["COCKROACH_DATABASE_URL"],
+              "ExplanationModelId": os.environ["BEDROCK_EXPLANATION_MODEL_ID"],
+              "EmbeddingModelId": os.environ["BEDROCK_EMBEDDING_MODEL_ID"],
+          }
+          with open('/tmp/evidencebound-parameters.json', 'w', encoding='utf-8') as handle:
+              json.dump([{"ParameterKey": key, "ParameterValue": value} for key, value in parameters.items()], handle)
+          PY
+
+          export DEPLOY_BUCKET S3_KEY
+          if [ -z "$EXISTING_STATUS" ]; then
+            aws cloudformation create-stack \
               --stack-name "$STACK_NAME" \
-              --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
-              --output table || true
-            exit 1
+              --template-body file:///tmp/evidencebound-template.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters file:///tmp/evidencebound-parameters.json >/dev/null
+            if ! aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"; then
+              echo "CLOUDFORMATION_CREATE=FAIL"
+              aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
+                --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+                --output table || true
+              exit 1
+            fi
+            echo "CLOUDFORMATION_CREATE=PASS"
+          else
+            set +e
+            UPDATE_OUTPUT="$(aws cloudformation update-stack \
+              --stack-name "$STACK_NAME" \
+              --template-body file:///tmp/evidencebound-template.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters file:///tmp/evidencebound-parameters.json 2>&1)"
+            UPDATE_RC=$?
+            set -e
+            if [ "$UPDATE_RC" -ne 0 ]; then
+              if printf '%s' "$UPDATE_OUTPUT" | grep -q 'No updates are to be performed'; then
+                echo "CLOUDFORMATION_UPDATE=NO_CHANGES"
+              else
+                echo "CLOUDFORMATION_UPDATE=FAIL"
+                printf '%s\n' "$UPDATE_OUTPUT"
+                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
+                  --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+                  --output table || true
+                exit 1
+              fi
+            else
+              if ! aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"; then
+                echo "CLOUDFORMATION_UPDATE_WAIT=FAIL"
+                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" \
+                  --query 'StackEvents[?ResourceStatusReason!=`null`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+                  --output table || true
+                exit 1
+              fi
+              echo "CLOUDFORMATION_UPDATE=PASS"
+            fi
           fi
-          echo "CLOUDFORMATION_DEPLOY=PASS"
 
       - name: Public independent-session acceptance
         run: |
