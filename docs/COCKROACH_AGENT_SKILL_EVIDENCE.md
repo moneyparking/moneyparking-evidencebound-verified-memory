@@ -1,15 +1,14 @@
 # CockroachDB Agent Skills usage evidence
 
-This integration was designed using the official `cockroachlabs/cockroachdb-skills` Agent Skills repository as an operational guardrail, not as copied documentation.
+Upstream repository: `cockroachlabs/cockroachdb-skills`
 
-Applied principles:
-- explicit schema migrations;
-- least-privilege runtime identity separated from administrative access;
-- indexes tied to actual lookup paths;
-- append-oriented verification history;
-- live acceptance inspects the real schema and vector index;
-- failures remain visible and fail closed.
+Reviewed upstream commit: `e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd`
 
-Official sources: Cockroach Labs Agent Skills documentation and `cockroachlabs/cockroachdb-skills`.
+Skills referenced during implementation:
 
-This is evidence of skill-guided implementation, not a claim that the Skills repository executed SQL itself.
+- `skills/cockroachdb-security-and-governance/hardening-user-privileges/SKILL.md`
+- `skills/cockroachdb-security-and-governance/managing-tls-certificates/SKILL.md`
+
+These references informed the runtime identity separation and the CockroachDB Cloud CA / `verify-full` connection repair used by the live acceptance workflow.
+
+This document records implementation provenance only. The Agent Skills repository does not execute application SQL.
