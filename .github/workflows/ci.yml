@@ -23,7 +23,6 @@ jobs:
 
   cockroach-live:
     runs-on: ubuntu-latest
-    if: ${{ secrets.COCKROACH_DATABASE_URL != '' }}
     env:
       COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
     steps:
@@ -32,6 +31,14 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Verify Cockroach secret presence
+        shell: bash
+        run: |
+          if [ -z "$COCKROACH_DATABASE_URL" ]; then
+            echo "COCKROACH_DATABASE_URL is missing" >&2
+            exit 1
+          fi
+          echo "COCKROACH_DATABASE_URL_PRESENT=true"
       - run: python -m pip install -e .
       - name: Real CockroachDB independent-session acceptance
         run: python scripts/live_acceptance.py
