@@ -1,4 +1,4 @@
-CREATE TABLE verified_memories (
+CREATE TABLE evidencebound_verified_memories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     memory_id UUID NOT NULL,
     session_id UUID NOT NULL,
@@ -10,18 +10,17 @@ CREATE TABLE verified_memories (
     record_hash STRING NOT NULL UNIQUE,
     previous_record_hash STRING NULL,
     snapshot JSONB NOT NULL,
-    INDEX verified_memories_memory_created_idx (memory_id, created_at DESC)
+    INDEX evidencebound_verified_memories_memory_created_idx (memory_id, created_at DESC)
 );
 -- statement-break
-CREATE TABLE verification_incidents (
+CREATE TABLE evidencebound_verification_incidents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     memory_id UUID NOT NULL,
     incident_type STRING NOT NULL,
     incident_text STRING NOT NULL,
     embedding VECTOR(1024) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    INDEX verification_incidents_memory_idx (memory_id)
+    INDEX evidencebound_verification_incidents_memory_idx (memory_id)
 );
 -- statement-break
-ALTER TABLE verification_incidents ADD COLUMN IF NOT EXISTS embedding VECTOR(1024) NULL;
--- statement-breakCREATE VECTOR INDEX verification_incidents_embedding_idx ON verification_incidents (embedding);
+CREATE VECTOR INDEX evidencebound_verification_incidents_embedding_idx ON evidencebound_verification_incidents (embedding);
