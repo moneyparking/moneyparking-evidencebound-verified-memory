@@ -1,0 +1,251 @@
+name: Cloud Acceptance
+
+on:
+  pull_request:
+  push:
+    branches: [judge-ready, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cockroach_live:
+    runs-on: ubuntu-latest
+    env:
+      COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
+      PGSSLROOTCERT: /etc/ssl/certs/ca-certificates.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: test -n "$COCKROACH_DATABASE_URL"
+      - run: python -m pip install -e .
+      - run: python scripts/cockroach_acceptance.py
+
+  aws_live:
+    if: github.event_name != 'pull_request'
+    needs: cockroach_live
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      AWS_REGION: us-east-1
+      COCKROACH_DATABASE_URL: ${{ secrets.COCKROACH_DATABASE_URL }}
+      BEDROCK_EXPLANATION_MODEL_ID: amazon.nova-micro-v1:0
+      STACK_NAME: evidencebound-verified-memory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Require bounded cloud configuration
+        run: |
+          test -n "$AWS_ROLE_ARN"
+          test -n "$COCKROACH_DATABASE_URL"
+          test "$AWS_REGION" = "us-east-1"
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: evidencebound-${{ github.run_id }}
+
+      - name: Verify AWS deployment identity
+        run: aws sts get-caller-identity
+
+      - name: Build Lambda deployment package
+        run: |
+          rm -rf .build
+          mkdir -p .build/lambda
+          python -m pip install -r requirements.txt -t .build/lambda --quiet
+          cp -R evidencebound .build/lambda/
+          (cd .build/lambda && zip -qr ../lambda.zip .)
+          test -s .build/lambda.zip
+
+      - name: Deploy CloudFormation stack
+        run: |
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          DEPLOY_BUCKET="evidencebound-deploy-${ACCOUNT_ID}-${AWS_REGION}"
+          S3_KEY="lambda/${GITHUB_SHA}.zip"
+          export DEPLOY_BUCKET S3_KEY
+          if ! aws s3api head-bucket --bucket "$DEPLOY_BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$DEPLOY_BUCKET" --region "$AWS_REGION"
+          fi
+          aws s3 cp .build/lambda.zip "s3://${DEPLOY_BUCKET}/${S3_KEY}" --only-show-errors
+
+          EXISTING_STATUS="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)"
+          if [ "$EXISTING_STATUS" = "ROLLBACK_COMPLETE" ]; then
+            aws cloudformation delete-stack --stack-name "$STACK_NAME"
+            aws cloudformation wait stack-delete-complete --stack-name "$STACK_NAME"
+            EXISTING_STATUS=""
+          fi
+
+          cat > /tmp/evidencebound-template.yaml <<'YAML'
+          AWSTemplateFormatVersion: '2010-09-09'
+          Description: EvidenceBound Verified Memory judge service
+          Parameters:
+            CodeBucket: {Type: String}
+            CodeKey: {Type: String}
+            CockroachDatabaseUrl: {Type: String, NoEcho: true}
+            ExplanationModelId: {Type: String}
+          Resources:
+            LambdaRole:
+              Type: AWS::IAM::Role
+              Properties:
+                RoleName: evidencebound-verified-memory-runtime
+                AssumeRolePolicyDocument:
+                  Version: '2012-10-17'
+                  Statement:
+                    - Effect: Allow
+                      Principal: {Service: lambda.amazonaws.com}
+                      Action: sts:AssumeRole
+                Policies:
+                  - PolicyName: EvidenceBoundRuntime
+                    PolicyDocument:
+                      Version: '2012-10-17'
+                      Statement:
+                        - Effect: Allow
+                          Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                          Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+                        - Effect: Allow
+                          Action: bedrock:InvokeModel
+                          Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ExplanationModelId}
+            Function:
+              Type: AWS::Lambda::Function
+              Properties:
+                FunctionName: evidencebound-verified-memory
+                Runtime: python3.12
+                Handler: evidencebound.handler.lambda_handler
+                Architectures: [x86_64]
+                MemorySize: 512
+                Timeout: 60
+                Role: !GetAtt LambdaRole.Arn
+                Code: {S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey}
+                Environment:
+                  Variables:
+                    COCKROACH_DATABASE_URL: !Ref CockroachDatabaseUrl
+                    BEDROCK_EXPLANATION_MODEL_ID: !Ref ExplanationModelId
+            FunctionUrl:
+              Type: AWS::Lambda::Url
+              Properties:
+                AuthType: NONE
+                InvokeMode: BUFFERED
+                TargetFunctionArn: !GetAtt Function.Arn
+            FunctionUrlPermission:
+              Type: AWS::Lambda::Permission
+              Properties:
+                Action: lambda:InvokeFunctionUrl
+                FunctionName: !Ref Function
+                FunctionUrlAuthType: NONE
+                Principal: '*'
+            FunctionInvokePermission:
+              Type: AWS::Lambda::Permission
+              Properties:
+                Action: lambda:InvokeFunction
+                FunctionName: !Ref Function
+                InvokedViaFunctionUrl: true
+                Principal: '*'
+          Outputs:
+            FunctionUrl: {Value: !GetAtt FunctionUrl.FunctionUrl}
+            FunctionArn: {Value: !GetAtt Function.Arn}
+          YAML
+
+          python - <<'PY'
+          import json, os
+          values = {
+              "CodeBucket": os.environ["DEPLOY_BUCKET"],
+              "CodeKey": os.environ["S3_KEY"],
+              "CockroachDatabaseUrl": os.environ["COCKROACH_DATABASE_URL"],
+              "ExplanationModelId": os.environ["BEDROCK_EXPLANATION_MODEL_ID"],
+          }
+          with open('/tmp/evidencebound-parameters.json', 'w', encoding='utf-8') as handle:
+              json.dump([{"ParameterKey": k, "ParameterValue": v} for k, v in values.items()], handle)
+          PY
+
+          if [ -z "$EXISTING_STATUS" ]; then
+            aws cloudformation create-stack \
+              --stack-name "$STACK_NAME" \
+              --template-body file:///tmp/evidencebound-template.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters file:///tmp/evidencebound-parameters.json >/dev/null
+            aws cloudformation wait stack-create-complete --stack-name "$STACK_NAME"
+            echo "CLOUDFORMATION_CREATE=PASS"
+          else
+            set +e
+            UPDATE_OUTPUT="$(aws cloudformation update-stack \
+              --stack-name "$STACK_NAME" \
+              --template-body file:///tmp/evidencebound-template.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters file:///tmp/evidencebound-parameters.json 2>&1)"
+            UPDATE_RC=$?
+            set -e
+            if [ "$UPDATE_RC" -ne 0 ]; then
+              if printf '%s' "$UPDATE_OUTPUT" | grep -q 'No updates are to be performed'; then
+                echo "CLOUDFORMATION_UPDATE=NO_CHANGES"
+              else
+                printf '%s\n' "$UPDATE_OUTPUT"
+                aws cloudformation describe-stack-events --stack-name "$STACK_NAME" --output table || true
+                exit 1
+              fi
+            else
+              aws cloudformation wait stack-update-complete --stack-name "$STACK_NAME"
+              echo "CLOUDFORMATION_UPDATE=PASS"
+            fi
+          fi
+
+      - name: Public independent-session acceptance
+        run: |
+          FUNCTION_URL="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FunctionUrl'].OutputValue" --output text)"
+          FUNCTION_ARN="$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FunctionArn'].OutputValue" --output text)"
+          test -n "$FUNCTION_URL"
+          test -n "$FUNCTION_ARN"
+          BASE="${FUNCTION_URL%/}"
+          echo "AWS_PUBLIC_URL=$FUNCTION_URL"
+
+          HEALTH_HTTP="$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$BASE/health")"
+          echo "PUBLIC_HEALTH_HTTP=$HEALTH_HTTP"
+          test "$HEALTH_HTTP" = "200"
+
+          SAVE_HTTP="$(curl --silent --show-error -o /tmp/save.json -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' "$BASE/api/save")"
+          echo "PUBLIC_SAVE_HTTP=$SAVE_HTTP"
+          if [ "$SAVE_HTTP" != "200" ]; then cat /tmp/save.json; exit 1; fi
+
+          MEMORY_ID="$(python -c 'import json; print(json.load(open("/tmp/save.json"))["memory_id"])')"
+          python - "$MEMORY_ID" > /tmp/reopen-body.json <<'PY'
+          import json, sys
+          print(json.dumps({"memory_id": sys.argv[1]}))
+          PY
+          REOPEN_HTTP="$(curl --silent --show-error -o /tmp/reopen.json -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary @/tmp/reopen-body.json "$BASE/api/reopen")"
+          echo "PUBLIC_REOPEN_HTTP=$REOPEN_HTTP"
+          if [ "$REOPEN_HTTP" != "200" ]; then cat /tmp/reopen.json; exit 1; fi
+
+          python - <<'PY'
+          import json
+          saved = json.load(open('/tmp/save.json'))
+          reopened = json.load(open('/tmp/reopen.json'))
+          assert saved['session_a_ended'] is True
+          assert saved['historical_decision'] == 'VERIFIED'
+          assert reopened['fresh_session'] is True
+          assert reopened['session_a_id'] != reopened['session_b_id']
+          assert reopened['historical_integrity'] == 'VERIFIED'
+          assert reopened['historical_decision'] == 'VERIFIED'
+          assert reopened['current_applicability'] == 'REVIEW_REQUIRED'
+          changes = {item['change'] for item in reopened['changes']}
+          assert {'UNCHANGED', 'CHANGED', 'STALE', 'NEW'}.issubset(changes)
+          assert reopened['recalled_incidents']
+          assert reopened['bedrock_explanation'].strip()
+          print(
+              'AWS_PUBLIC_ACCEPTANCE=PASS '
+              f"integrity={reopened['historical_integrity']} "
+              f"applicability={reopened['current_applicability']} "
+              f"changes={','.join(sorted(changes))} "
+              'vector_signature=deterministic bedrock_model=nova-micro explanation=present fresh_session=true'
+          )
+          PY
+          echo "AWS_DEPLOYMENT_IDENTITY=PASS function_arn=$FUNCTION_ARN"
