@@ -1,82 +1,151 @@
-# <3 Minute Judge Video Script
+# Canonical <3 Minute Verified Memory Video
 
-Target length: **2:25–2:45**.
+Target length: **2:30–2:45**. Hard stop: **< 3:00**.
 
-## 0:00–0:12 — Cold open
+Primary acceptance target: visibly satisfy the Devpost requirement that the video shows the working project **and the CockroachDB memory layer at work**.
 
-Screen: public EvidenceBound demo landing page.
+Secondary reuse target: the finished video may later be cited as a **prior EvidenceBound reference implementation** for AI-BOOST Challenge 4 / EvidenceBound ScenarioGraph. It must **not** claim to be a ScenarioGraph demo.
 
-Voice:
+## Narrative primitives
 
-> Most agents remember answers. EvidenceBound remembers the proof. The question is not only what the agent decided — it is what changed since the last review, and can we prove why the earlier decision existed?
+Use this generic EvidenceBound sequence throughout the narration:
 
-## 0:12–0:32 — Architecture in one sentence
+**evidence/provenance binding → deterministic verification → persisted trusted state → exact change detection → selective re-evaluation/recovery → bounded LLM explanation**
 
-Screen: README architecture diagram.
+The LLM never makes or overrides the trust decision.
 
-Voice:
+## 0:00–0:12 — Working public product + trust boundary
 
-> Session A verifies a decision and saves the evidence-bound snapshot to CockroachDB. Session A ends. A fresh Session B reloads that historical memory from CockroachDB, verifies integrity, compares T1 evidence deterministically, re-evaluates applicability, recalls prior verification incidents through Cockroach vector indexing, and only then asks Amazon Bedrock to explain the trusted result.
+Screen: open the public Lambda Function URL. Keep the browser URL visible briefly. Show the on-page EvidenceBound architecture strip and badges:
 
-## 0:32–0:58 — Save T0
-
-Screen: return to public demo and click **Save T0 / End Session A**.
-
-Point to returned fields.
+- `PUBLIC RUNTIME · AWS LAMBDA`
+- `PERSISTENT MEMORY · COCKROACHDB CLOUD`
+- `LLM OUTSIDE TRUST BOUNDARY`
 
 Voice:
 
-> This is a controlled judge fixture, explicitly not live sports data. T0 is VERIFIED. The response gives us a public memory ID and confirms Session A has ended. The record is now persisted in CockroachDB — there is no process-local memory to rely on.
+> Most agents remember answers. EvidenceBound remembers the proof. It binds decisions to evidence and provenance, verifies them deterministically, persists trusted state, detects exact changes later, and only then lets an LLM explain the result.
 
-## 0:58–1:20 — Fresh independent Session B
+## 0:12–0:38 — Session A → Save T0 → verified CockroachDB write/read-back
 
-Screen: click **Open fresh Session B** so a new tab appears with only the memory ID.
+Screen: click **1. Save T0 / End Session A**.
 
-Voice:
+Hold on the `CockroachDB memory layer` card until it visibly shows:
 
-> This new tab carries only the memory ID. Session B must retrieve the historical decision from CockroachDB. That database dependency is enforced in the live acceptance workflow with a fresh repository and service instance.
-
-## 1:20–1:55 — Reopen and answer the judge question
-
-Screen: click **Reopen T1** and zoom to trusted fields.
-
-Voice:
-
-> Historical integrity is still VERIFIED. But current applicability is REVIEW_REQUIRED. The deterministic diff contains UNCHANGED, CHANGED, STALE, and NEW evidence. A changed hash does not automatically become REFUTED. That distinction prevents an agent from rewriting history just because the world changed.
-
-## 1:55–2:15 — CockroachDB tools
-
-Screen: show README sections for vector index and Agent Skills, then GitHub Actions acceptance log if practical.
+- `WRITE + READBACK VERIFIED`
+- `CockroachDB Cloud`
+- the generated `memory_id`
+- `record_hash`
+- table `evidencebound_verified_memories`
+- real vector index name
+- Session A ended
 
 Voice:
 
-> CockroachDB is the behavioral memory layer. We use Distributed Vector Indexing for verification-incident recall, and the official CockroachDB SQL Agent Skill with live connected EXPLAIN gates for both memory and vector retrieval. The public flow is backed by real CockroachDB Cloud, not a mock.
+> Session A verifies T0 and persists the evidence-bound snapshot to CockroachDB. Save does not report success until the just-written record can be read back through the database boundary with the same proof hash. Session A then ends.
 
-## 2:15–2:35 — AWS and Bedrock boundary
+## 0:38–0:55 — Real CockroachDB surface
 
-Screen: highlight Bedrock explanation on the T1 response, then Actions green run.
+Screen: briefly switch to the real CockroachDB Cloud SQL surface. Do not expose credentials, connection strings, billing, or secrets.
+
+Query the same public `memory_id` and show one row from the verified-memory table. Safe example:
+
+```sql
+SELECT memory_id, session_id, decision_state, record_hash, created_at
+FROM evidencebound_verified_memories
+WHERE memory_id = '<PUBLIC_MEMORY_ID>';
+```
+
+Then show the vector index with a prepared safe query or the CockroachDB index view. Safe SQL example:
+
+```sql
+SHOW INDEXES FROM evidencebound_verification_incidents;
+```
+
+The same `memory_id` from the public app must be readable on the CockroachDB row.
 
 Voice:
 
-> The service runs on AWS Lambda, deployed from GitHub OIDC through S3 and CloudFormation. Amazon Nova Micro explains the deterministic result, but it cannot change evidence, provenance, integrity, diff classifications, or applicability. If historical memory is tampered with, EvidenceBound fails closed and Bedrock is not called.
+> This is the same T0 in CockroachDB Cloud, keyed by the public memory ID. Verified memory and verification-incident vector recall live in the same persistent database layer.
 
-## 2:35–2:45 — Close
+## 0:55–1:08 — Independent/fresh Session B
 
-Screen: landing page/tagline.
+Screen: return to the public app and click **2. Open fresh Session B**. A new tab must open.
+
+The new tab should visibly say that Session B input contains **only `memory_id`** and is awaiting a CockroachDB historical read.
 
 Voice:
 
-> Most agents remember answers. EvidenceBound remembers the proof — and proves what changed.
+> Now Session A is gone. This fresh Session B receives only the memory ID. It must reconstruct the historical state from CockroachDB; no process-local answer is carried forward.
 
-## Recording checklist
+## 1:08–1:43 — Reopen T1 from CockroachDB
 
-- 1920×1080 or 2560×1440.
-- Browser zoom 110–125% so trusted fields are readable.
-- Keep the public URL visible once near the beginning.
-- Show the new-tab Session B transition clearly.
-- Show `VERIFIED` and `REVIEW_REQUIRED` at the same time.
-- Show all four change classes.
-- Show the Bedrock explanation but do not linger on generated prose.
-- Briefly show green GitHub Actions as production evidence.
-- Do not show AWS/Cockroach secrets, environment values, billing pages, or credentials.
-- Upload public/unlisted-as-required-by-rules to YouTube or Vimeo; Devpost requires a public video URL.
+Screen: click **3. Reopen T1 from CockroachDB**.
+
+Hold on the cards until all of the following are readable together or in a short scroll:
+
+- `HISTORICAL READ VERIFIED`
+- `fresh Session B = true`
+- `historical integrity = VERIFIED`
+- `historical decision = VERIFIED`
+- `current applicability = REVIEW_REQUIRED`
+- `UNCHANGED`
+- `CHANGED`
+- `STALE`
+- `NEW`
+- CockroachDB vector index name
+- recalled incident count
+
+Voice:
+
+> Session B reloads T0 from CockroachDB and re-verifies its historical proof. The past decision remains VERIFIED and its integrity remains VERIFIED, while current applicability becomes REVIEW_REQUIRED. The deterministic diff contains UNCHANGED, CHANGED, STALE, and NEW. A changed hash does not automatically mean REFUTED.
+
+## 1:43–2:02 — CockroachDB memory behavior, not a storage checkbox
+
+Screen: keep the memory-layer and change/recall cards visible. If useful, show the real CockroachDB vector/index surface for only a few seconds.
+
+Voice:
+
+> CockroachDB is a behavioral dependency. Without the persisted T0, Session B fails closed. Distributed Vector Indexing recalls prior verification incidents so the agent can reuse verified context without creating a separate consistency boundary.
+
+## 2:02–2:24 — AWS Lambda + bounded Bedrock explanation
+
+Screen: show the `PUBLIC RUNTIME · AWS LAMBDA` badge and the `Bounded LLM explanation` card. Optionally use a very short AWS Lambda console shot showing the deployed function / Function URL, without account-sensitive information.
+
+Voice:
+
+> The public service runs on AWS Lambda. After EvidenceBound has finalized integrity, diff, and applicability, Amazon Bedrock generates a bounded explanation. Bedrock cannot alter evidence, provenance, hashes, classifications, or trusted state. If historical integrity fails, Bedrock is not called.
+
+## 2:24–2:40 — Universal close
+
+Screen: return to the EvidenceBound architecture strip / final trusted-state view.
+
+Voice:
+
+> EvidenceBound keeps generated decisions tied to the evidence and state that made them trustworthy — across sessions, systems and changing inputs.
+
+Do **not** say that this video is ScenarioGraph.
+
+# Recording acceptance checklist
+
+- Duration is **< 3:00**.
+- Video is **Public** on YouTube or Vimeo.
+- Working public product is shown, not slides only.
+- Session A → Save T0 is shown.
+- `WRITE + READBACK VERIFIED` is readable on screen.
+- Real CockroachDB Cloud surface shows the same public `memory_id` persisted in `evidencebound_verified_memories`.
+- CockroachDB vector/index behavior is shown visually.
+- Session A ends before Session B is opened.
+- Fresh Session B visibly starts with only `memory_id`.
+- Session B visibly shows `HISTORICAL READ VERIFIED` from CockroachDB.
+- `historical integrity = VERIFIED` and `current applicability = REVIEW_REQUIRED` are both readable.
+- `UNCHANGED`, `CHANGED`, `STALE`, and `NEW` are visible.
+- AWS Lambda/public runtime is visible.
+- Bedrock is presented only as bounded explanation after deterministic trust state.
+- No SignalReview branding.
+- No automotive/crash ScenarioGraph claim.
+- No automotive safety, certification, homologation, or arbitrary compromise-detection claims.
+- No secrets, private DB URLs, AWS credentials, billing data, or environment values on screen.
+- CockroachDB hackathon branding is not the dominant product identity.
+- One canonical video URL is used in Devpost.
+- Disable Remix/Shorts remixing if YouTube offers the setting.
