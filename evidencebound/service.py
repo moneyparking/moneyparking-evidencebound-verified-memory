@@ -19,6 +19,8 @@ from .demo import demo_evidence
 POLICY_VERSION = "evidencebound-policy-1"
 PROOF_VERSION = "evidencebound-proof-1"
 VECTOR_DIMENSIONS = 1024
+MEMORY_TABLE = "evidencebound_verified_memories"
+INCIDENT_TABLE = "evidencebound_verification_incidents"
 
 
 class Repository(Protocol):
@@ -84,6 +86,14 @@ class EvidenceBoundService:
             text=incident_text,
             embedding=incident_vector(incident_text),
         )
+
+        # The public Save path does not report success until the just-written T0
+        # can be read back through the repository boundary with the same proof hash.
+        persisted = self.repository.load_latest(memory_id)
+        if persisted is None or persisted.get("record_hash") != snapshot["record_hash"]:
+            raise RuntimeError("cockroach_persistence_verification_failed")
+        tooling = self.repository.tooling_evidence()
+
         return {
             "memory_id": memory_id,
             "session_a_id": session_id,
@@ -91,6 +101,15 @@ class EvidenceBoundService:
             "record_hash": snapshot["record_hash"],
             "evidence_hash": snapshot["evidence_hash"],
             "session_a_ended": True,
+            "memory_layer": {
+                "backend": "CockroachDB Cloud",
+                "memory_table": MEMORY_TABLE,
+                "incident_table": INCIDENT_TABLE,
+                "write_confirmed": True,
+                "readback_confirmed": True,
+                "vector_index": tooling.get("vector_index"),
+                "verified_memory_rows": tooling.get("verified_memory_rows"),
+            },
         }
 
     def reopen_t1(self, memory_id: str) -> dict[str, Any]:
@@ -103,6 +122,11 @@ class EvidenceBoundService:
                 "historical_integrity": FAIL_CLOSED,
                 "current_applicability": FAIL_CLOSED,
                 "reason": "historical_memory_missing",
+                "memory_layer": {
+                    "backend": "CockroachDB Cloud",
+                    "memory_table": MEMORY_TABLE,
+                    "historical_read_confirmed": False,
+                },
             }
         integrity = verify_snapshot(
             snapshot,
@@ -117,12 +141,20 @@ class EvidenceBoundService:
                 "historical_decision": snapshot.get("decision_state"),
                 "current_applicability": FAIL_CLOSED,
                 "reason": integrity["reason"],
+                "memory_layer": {
+                    "backend": "CockroachDB Cloud",
+                    "memory_table": MEMORY_TABLE,
+                    "historical_read_confirmed": True,
+                    "record_hash_reverified": False,
+                },
             }
         historical_base = datetime.fromisoformat(
             snapshot["evidence"][0]["observed_at"].replace("Z", "+00:00")
         )
         _, current, evaluated_at = demo_evidence(historical_base)
         changes = diff_evidence(snapshot["evidence"], current, evaluated_at=evaluated_at)
+        recalled_incidents = self.repository.recall_incidents(memory_id=memory_id, limit=3)
+        tooling = self.repository.tooling_evidence()
         result = {
             "memory_id": memory_id,
             "session_a_id": snapshot["session_id"],
@@ -132,10 +164,20 @@ class EvidenceBoundService:
             "historical_decision": snapshot["decision_state"],
             "current_applicability": current_applicability(integrity["state"], changes),
             "changes": changes,
-            "recalled_incidents": self.repository.recall_incidents(memory_id=memory_id, limit=3),
+            "recalled_incidents": recalled_incidents,
             "record_hash": snapshot["record_hash"],
             "evidence_hash": snapshot["evidence_hash"],
-            "tooling": self.repository.tooling_evidence(),
+            "tooling": tooling,
+            "memory_layer": {
+                "backend": "CockroachDB Cloud",
+                "memory_table": MEMORY_TABLE,
+                "incident_table": INCIDENT_TABLE,
+                "historical_read_confirmed": True,
+                "record_hash_reverified": True,
+                "vector_index": tooling.get("vector_index"),
+                "recalled_incident_count": len(recalled_incidents),
+                "verified_memory_rows": tooling.get("verified_memory_rows"),
+            },
         }
         result["bedrock_explanation"] = self.bedrock.explain(result)
         return result
