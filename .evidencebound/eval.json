@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "repository": "moneyparking/moneyparking-evidencebound-verified-memory",
+  "policy": {
+    "development": "audit",
+    "frozen": "audit"
+  },
+  "bootstrap": [
+    {
+      "id": "install-dev",
+      "command": "python -m pip install -e '.[dev]'",
+      "timeout_seconds": 900
+    }
+  ],
+  "suites": [
+    {
+      "id": "verified-memory-tests",
+      "phase": "development",
+      "command": "python -m pytest -q",
+      "hard_gate": true,
+      "timeout_seconds": 1200
+    }
+  ],
+  "freeze": {
+    "enabled": false
+  }
+}
