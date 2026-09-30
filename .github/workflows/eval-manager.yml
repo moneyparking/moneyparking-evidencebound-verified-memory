@@ -1,0 +1,17 @@
+name: Shared Eval Manager
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  development:
+    uses: evidencebound/.github/.github/workflows/eval-development.yml@main
+    with:
+      contract: .evidencebound/eval.json
+      python_version: "3.12"
